@@ -417,6 +417,85 @@ static void AdvanceAfterEnd() {
     PlayAt(next);
 }
 
+// Next/previous track shared by the menus, the in-app shortcuts and the
+// keyboard media keys (WndProc). Same wrap rules as Playback > Next.
+static void DoNextTrack() {
+    if (g_order.empty()) return;
+    if (!g_hasCurrent) {
+        PlayAt(g_pos < g_order.size() ? g_pos : 0);
+        return;
+    }
+    size_t n = g_pos + 1;
+    if (n >= g_order.size()) n = (g_loop == 1) ? 0 : g_order.size() - 1;
+    PlayAt(n);
+}
+
+static void DoPrevTrack() {
+    if (g_order.empty()) return;
+    if (!g_hasCurrent) {
+        PlayAt(g_pos < g_order.size() ? g_pos : 0);
+        return;
+    }
+    size_t n = (g_pos > 0) ? g_pos - 1 : 0;
+    PlayAt(n);
+}
+
+// Relative seek for media fast-forward/rewind keys. SeekTo clamps.
+static void DoSeekBy(int seconds) {
+    if (!g_hasCurrent) return;
+    int rate = g_player.Info().sampleRate;
+    if (rate <= 0) return;
+    int64_t total = g_player.Info().totalBlocks;
+    int64_t target = g_player.Position() + (int64_t)seconds * (int64_t)rate;
+    g_player.SeekTo(target);
+    if (total > 0) {
+        if (target < 0) target = 0;
+        if (target > total) target = total;
+        g_seekPos = (int)(target * 1000 / total);
+    }
+}
+
+// Explicit play/pause for APPCOMMAND_MEDIA_PLAY/PAUSE (DoPlayPause toggles,
+// which would do the wrong thing for a directed command).
+static void MediaPlay() {
+    if (!g_hasCurrent) {
+        if (!g_order.empty()) PlayAt(g_pos < g_order.size() ? g_pos : 0);
+        return;
+    }
+    if (g_player.Paused()) {
+        g_player.SetPaused(false);
+        SetState("Playing");
+    } else if (!g_player.DeviceRunning()) {
+        std::wstring err;
+        if (g_player.Start(err))
+            SetState("Playing");
+        else
+            SetState("Error");
+    }
+}
+
+static void MediaPause() {
+    if (g_hasCurrent && g_player.DeviceRunning() && !g_player.Paused()) {
+        g_player.SetPaused(true);
+        SetState("Paused");
+    }
+}
+
+// Runs every main-loop iteration, even while minimized/occluded (when
+// DrawMainUI is skipped). Advances the playlist when a track ends and
+// keeps the seek mirror fresh so playback continues in the background.
+static void PollPlayback() {
+    if (!g_hasCurrent) return;
+    if (g_player.Finished()) {
+        AdvanceAfterEnd();
+    } else if (g_player.DeviceRunning()) {
+        int64_t total = g_player.Info().totalBlocks;
+        int64_t pos = g_player.Position();
+        if (total > 0) g_seekPos = (int)(pos * 1000 / total);
+        SetState(g_player.Paused() ? "Paused" : "Playing");
+    }
+}
+
 static void RemoveRow(int sel) {
     if (sel < 0 || (size_t)sel >= g_order.size()) return;
     int removedTrack = g_order[(size_t)sel];
@@ -750,9 +829,131 @@ static bool IsCliVerb(int argc, wchar_t** argv) {
 }
 
 // ---------------------------------------------------------------- WndProc
+// Media-key plumbing. Keyboards/remotes reach us two ways: WM_APPCOMMAND
+// (foreground) and VK_MEDIA_* key-downs. RegisterHotKey additionally routes
+// the keys as WM_HOTKEY while minimized or in the background; failures are
+// ignored (another app may own them) since the foreground paths still work.
+// Older MinGW headers may miss some constants, so fall back to the numeric
+// values from winuser.h.
+#ifndef FAPPCOMMAND_MASK
+#define FAPPCOMMAND_MASK 0xF000
+#endif
+#ifndef GET_APPCOMMAND_LPARAM
+#define GET_APPCOMMAND_LPARAM(lParam) ((short)(HIWORD(lParam) & ~FAPPCOMMAND_MASK))
+#endif
+#ifndef APPCOMMAND_BROWSER_BACKWARD
+#define APPCOMMAND_BROWSER_BACKWARD 1
+#endif
+#ifndef APPCOMMAND_BROWSER_FORWARD
+#define APPCOMMAND_BROWSER_FORWARD 2
+#endif
+#ifndef APPCOMMAND_MEDIA_NEXTTRACK
+#define APPCOMMAND_MEDIA_NEXTTRACK 11
+#endif
+#ifndef APPCOMMAND_MEDIA_PREVIOUSTRACK
+#define APPCOMMAND_MEDIA_PREVIOUSTRACK 12
+#endif
+#ifndef APPCOMMAND_MEDIA_STOP
+#define APPCOMMAND_MEDIA_STOP 13
+#endif
+#ifndef APPCOMMAND_MEDIA_PLAY_PAUSE
+#define APPCOMMAND_MEDIA_PLAY_PAUSE 14
+#endif
+#ifndef APPCOMMAND_MEDIA_PLAY
+#define APPCOMMAND_MEDIA_PLAY 46
+#endif
+#ifndef APPCOMMAND_MEDIA_PAUSE
+#define APPCOMMAND_MEDIA_PAUSE 47
+#endif
+#ifndef APPCOMMAND_MEDIA_FAST_FORWARD
+#define APPCOMMAND_MEDIA_FAST_FORWARD 49
+#endif
+#ifndef APPCOMMAND_MEDIA_REWIND
+#define APPCOMMAND_MEDIA_REWIND 50
+#endif
+#ifndef VK_MEDIA_NEXT_TRACK
+#define VK_MEDIA_NEXT_TRACK 0xB0
+#endif
+#ifndef VK_MEDIA_PREV_TRACK
+#define VK_MEDIA_PREV_TRACK 0xB1
+#endif
+#ifndef VK_MEDIA_STOP
+#define VK_MEDIA_STOP 0xB2
+#endif
+#ifndef VK_MEDIA_PLAY_PAUSE
+#define VK_MEDIA_PLAY_PAUSE 0xB3
+#endif
+#ifndef VK_BROWSER_BACK
+#define VK_BROWSER_BACK 0xA6
+#endif
+#ifndef VK_BROWSER_FORWARD
+#define VK_BROWSER_FORWARD 0xA7
+#endif
+#ifndef MOD_NOREPEAT
+#define MOD_NOREPEAT 0x4000
+#endif
+
+enum { HOTKEY_PLAYPAUSE = 101, HOTKEY_STOP = 102, HOTKEY_NEXT = 103, HOTKEY_PREV = 104 };
+
+static void RegisterMediaHotKeys(HWND hWnd) {
+    // No modifiers: these are dedicated keys, not combos. MOD_NOREPEAT
+    // suppresses auto-repeat spam while held. Any failure just means the
+    // foreground paths (WM_APPCOMMAND / VK_MEDIA) still apply.
+    RegisterHotKey(hWnd, HOTKEY_PLAYPAUSE, MOD_NOREPEAT, VK_MEDIA_PLAY_PAUSE);
+    RegisterHotKey(hWnd, HOTKEY_STOP, MOD_NOREPEAT, VK_MEDIA_STOP);
+    RegisterHotKey(hWnd, HOTKEY_NEXT, MOD_NOREPEAT, VK_MEDIA_NEXT_TRACK);
+    RegisterHotKey(hWnd, HOTKEY_PREV, MOD_NOREPEAT, VK_MEDIA_PREV_TRACK);
+}
+
+static void UnregisterMediaHotKeys(HWND hWnd) {
+    UnregisterHotKey(hWnd, HOTKEY_PLAYPAUSE);
+    UnregisterHotKey(hWnd, HOTKEY_STOP);
+    UnregisterHotKey(hWnd, HOTKEY_NEXT);
+    UnregisterHotKey(hWnd, HOTKEY_PREV);
+}
+
 static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return true;
     switch (msg) {
+    case WM_APPCOMMAND: {
+        switch (GET_APPCOMMAND_LPARAM(lParam)) {
+        case APPCOMMAND_MEDIA_PLAY_PAUSE: DoPlayPause(); return TRUE;
+        case APPCOMMAND_MEDIA_PLAY: MediaPlay(); return TRUE;
+        case APPCOMMAND_MEDIA_PAUSE: MediaPause(); return TRUE;
+        case APPCOMMAND_MEDIA_STOP: StopPlayback(); return TRUE;
+        case APPCOMMAND_MEDIA_NEXTTRACK: DoNextTrack(); return TRUE;
+        case APPCOMMAND_MEDIA_PREVIOUSTRACK: DoPrevTrack(); return TRUE;
+        case APPCOMMAND_MEDIA_FAST_FORWARD: DoSeekBy(10); return TRUE;
+        case APPCOMMAND_MEDIA_REWIND: DoSeekBy(-10); return TRUE;
+        case APPCOMMAND_BROWSER_FORWARD: DoNextTrack(); return TRUE;
+        case APPCOMMAND_BROWSER_BACKWARD: DoPrevTrack(); return TRUE;
+        }
+        break;
+    }
+    case WM_HOTKEY: {
+        switch (wParam) {
+        case HOTKEY_PLAYPAUSE: DoPlayPause(); return 0;
+        case HOTKEY_STOP: StopPlayback(); return 0;
+        case HOTKEY_NEXT: DoNextTrack(); return 0;
+        case HOTKEY_PREV: DoPrevTrack(); return 0;
+        }
+        break;
+    }
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN: {
+        // Bit 30: key was already down (auto-repeat). Ignore repeats so a
+        // held play/pause key doesn't stutter between play and pause.
+        bool repeat = (lParam & (1 << 30)) != 0;
+        switch (wParam) {
+        case VK_MEDIA_PLAY_PAUSE: if (!repeat) DoPlayPause(); return 0;
+        case VK_MEDIA_STOP: if (!repeat) StopPlayback(); return 0;
+        case VK_MEDIA_NEXT_TRACK: if (!repeat) DoNextTrack(); return 0;
+        case VK_MEDIA_PREV_TRACK: if (!repeat) DoPrevTrack(); return 0;
+        case VK_BROWSER_FORWARD: if (!repeat) DoNextTrack(); return 0;
+        case VK_BROWSER_BACK: if (!repeat) DoPrevTrack(); return 0;
+        }
+        break;
+    }
     case WM_SIZE:
         if (wParam == SIZE_MINIMIZED) return 0;
         g_ResizeWidth = (UINT)LOWORD(lParam);
@@ -989,6 +1190,27 @@ static bool SymbolButton(const char* id, Sym s, const char* tip, bool dim = fals
     return pressed;
 }
 
+// File/folder pickers shared by the File menu, the playlist context menu
+// and the Ctrl+O / Shift+O shortcuts. Modal Win32 dialogs; safe to call
+// from inside the ImGui frame like the menus already did.
+static void DoOpenFiles() {
+    std::vector<std::wstring> picked;
+    if (OpenFilesDialog(picked, AudioFileFilter(), L"Open audio files - AudioPlayer")) {
+        bool added = false;
+        AddPaths(picked, added);
+        if (added && !g_hasCurrent) PlayAt(0);
+    }
+}
+
+static void DoAddFolder() {
+    std::wstring dir;
+    if (BrowseFolder(dir)) {
+        bool added = false;
+        AddPaths({dir}, added);
+        if (added && !g_hasCurrent) PlayAt(0);
+    }
+}
+
 static void DrawMainUI() {    PollCover(); // adopt any finished background cover decode
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
@@ -1007,21 +1229,10 @@ static void DrawMainUI() {    PollCover(); // adopt any finished background cove
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open files...", "Ctrl+O")) {
-                std::vector<std::wstring> picked;
-                if (OpenFilesDialog(picked, AudioFileFilter(),
-                                    L"Open audio files - AudioPlayer")) {
-                    bool added = false;
-                    AddPaths(picked, added);
-                    if (added && !g_hasCurrent) PlayAt(0);
-                }
+                DoOpenFiles();
             }
-            if (ImGui::MenuItem("Add folder...")) {
-                std::wstring dir;
-                if (BrowseFolder(dir)) {
-                    bool added = false;
-                    AddPaths({dir}, added);
-                    if (added && !g_hasCurrent) PlayAt(0);
-                }
+            if (ImGui::MenuItem("Add folder...", "Shift+O")) {
+                DoAddFolder();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Convert...")) {
@@ -1102,17 +1313,8 @@ static void DrawMainUI() {    PollCover(); // adopt any finished background cove
     }
     ImGui::Dummy(ImVec2(0.0f, 4.0f)); // top breathing room (window top padding is 0)
 
-    // ---- playback polling ----
-    if (g_hasCurrent) {
-        if (g_player.Finished()) {
-            AdvanceAfterEnd();
-        } else if (g_player.DeviceRunning()) {
-            int64_t total = g_player.Info().totalBlocks;
-            int64_t pos = g_player.Position();
-            if (total > 0) g_seekPos = (int)(pos * 1000 / total);
-            SetState(g_player.Paused() ? "Paused" : "Playing");
-        }
-    }
+    // ---- playback polling (also runs in the main loop while occluded) ----
+    PollPlayback();
 
     // ---- now playing ----
     if (g_hasCurrent && g_pos < g_order.size()) {
@@ -1196,21 +1398,10 @@ static void DrawMainUI() {    PollCover(); // adopt any finished background cove
     if (ImGui::BeginPopupContextWindow("listempty", ImGuiPopupFlags_MouseButtonRight |
                                                        ImGuiPopupFlags_NoOpenOverItems)) {
         if (ImGui::MenuItem("Add files...")) {
-            std::vector<std::wstring> picked;
-            if (OpenFilesDialog(picked, AudioFileFilter(),
-                                L"Open audio files - AudioPlayer")) {
-                bool added = false;
-                AddPaths(picked, added);
-                if (added && !g_hasCurrent) PlayAt(0);
-            }
+            DoOpenFiles();
         }
         if (ImGui::MenuItem("Add folder...")) {
-            std::wstring dir;
-            if (BrowseFolder(dir)) {
-                bool added = false;
-                AddPaths({dir}, added);
-                if (added && !g_hasCurrent) PlayAt(0);
-            }
+            DoAddFolder();
         }
         ImGui::EndPopup();
     }
@@ -1371,6 +1562,10 @@ static void DrawMainUI() {    PollCover(); // adopt any finished background cove
     // ---- global shortcuts (when not typing) ----
     ImGuiIO& io = ImGui::GetIO();
     if (!io.WantTextInput && !g_showConvert && !g_showDetails && !g_showAbout) {
+        // MenuItem shortcut strings are display-only in ImGui: the keys have
+        // to be bound here. No-repeat so a held chord opens one dialog.
+        if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) DoOpenFiles();
+        if (io.KeyShift && !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false)) DoAddFolder();
         if (ImGui::IsKeyPressed(ImGuiKey_Space)) DoPlayPause();
         if (ImGui::IsKeyPressed(ImGuiKey_N)) {
             if (!g_order.empty()) {
@@ -1576,6 +1771,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show) {
     }
     g_hwnd = hwnd;
     DragAcceptFiles(hwnd, TRUE);
+    RegisterMediaHotKeys(hwnd); // play/pause/stop/next/prev incl. while in background
     if (wc.hIcon) {
         SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)wc.hIcon);
         SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)wc.hIcon);
@@ -1637,6 +1833,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show) {
             if (added && !g_hasCurrent) PlayAt(0);
         }
 
+        // Keep the playlist advancing while minimized/occluded: the
+        // occluded early-out below skips DrawMainUI (which also polls),
+        // so poll here first. Audio itself runs on miniaudio's thread.
+        PollPlayback();
+
         if (g_SwapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
             ::Sleep(10);
             continue;
@@ -1680,6 +1881,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show) {
     ImGui::DestroyContext();
 
     CleanupDeviceD3D();
+    UnregisterMediaHotKeys(hwnd);
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, hInst);
     CoUninitialize();
