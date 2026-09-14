@@ -1,0 +1,135 @@
+#pragma once
+
+#include "MACListCtrl.h"
+#include "MACStatusBar.h"
+#include "MACProcessFiles.h"
+#include "MACFileArray.h"
+
+#define MENU_BORDER theApp.GetSize(2)
+#define MENU_RIGHT_BORDER theApp.GetSize(16)
+#define MENU_EXTRA_HEIGHT theApp.GetSize(8)
+
+class CMACDlg : public CDialog
+{
+public:
+    CMACDlg(CStringArrayEx * paryFiles, CWnd * pParent = APE_NULL);
+
+    static CMACDlg * s_pThis;
+
+    enum { IDD = IDD_MAC_DIALOG };
+    CMACListCtrl m_ctrlList;
+    CMACStatusBar m_ctrlStatusBar;
+    CToolBar m_ctrlToolbar;
+    CArray<CStatic *> m_aryMenus;
+
+    bool GetProcessing() { return (m_spProcessFiles != APE_NULL); }
+    bool GetInitialized() const { return m_bInitialized; }
+    int GetFontHeight() { return m_nFontHeight; }
+
+    virtual BOOL PreTranslateMessage(MSG * pMsg) APE_OVERRIDE;
+    virtual void WinHelp(DWORD_PTR dwData, UINT nCmd = HELP_CONTEXT);
+
+    int GetControlHeight(CWnd * pwndControl) const;
+    void LayoutControlTop(CWnd * pwndLayout, CRect & rectLayout, bool bOnlyControlWidth = false, bool bCombobox = false, CWnd * pwndRight = APE_NULL) const;
+    void LayoutControlTopWithDivider(CWnd * pwndLayout, CWnd * pwndDivider, CWnd * pwndImage, CRect & rectLayout) const;
+    bool SetMode(APE::APE_MODES Mode);
+    void FilesChanged(MAC_FILE_ARRAY * paryFiles);
+    MAC_FILE_ARRAY & GetFileArray() { return m_aryFiles; }
+    void ChangeMenuToOwnerDraw(CMenu * pMenu, int nLevel = 100);
+    LRESULT MouseProc(int nCode, WPARAM wParam, LPARAM lParam);
+
+protected:
+    virtual void DoDataExchange(CDataExchange * pDX) APE_OVERRIDE;
+
+    virtual BOOL OnInitDialog() APE_OVERRIDE;
+    afx_msg void OnPaint();
+    afx_msg HCURSOR OnQueryDragIcon();
+    afx_msg void OnMenuFile();
+    afx_msg void OnMenuMode();
+    afx_msg void OnMenuTools();
+    afx_msg void OnMenuHelp();
+    afx_msg void OnMenuStop();
+    afx_msg void OnMenuPause();
+    afx_msg void OnFileProcessFiles();
+    afx_msg void OnFileAddFiles();
+    afx_msg void OnFileAddFolder();
+    afx_msg void OnFileSelectAll();
+    afx_msg void OnFileClearFiles();
+    afx_msg void OnFileRemoveFiles();
+    afx_msg void OnFileFileInfo();
+    afx_msg void OnFileExit();
+    afx_msg void OnSize(UINT nType, int cx, int cy);
+    afx_msg void OnTimer(UINT_PTR nIDEvent);
+    afx_msg void OnToolbarDropDown(NMHDR * pnmh, LRESULT * plRes);
+    afx_msg void OnModeCompress();
+    afx_msg void OnModeDecompress();
+    afx_msg void OnModeVerify();
+    afx_msg void OnModeConvert();
+    afx_msg void OnModeMakeAPL();
+    afx_msg void OnStop();
+    afx_msg void OnCompression();
+    afx_msg void OnCompressionAPEExtraHigh();
+    afx_msg void OnCompressionAPEFast();
+    afx_msg void OnCompressionAPEHigh();
+    afx_msg void OnCompressionAPENormal();
+    afx_msg void OnCompressionAPEInsane();
+    afx_msg void OnSetCompressionMenu(UINT nID);
+    afx_msg void OnDestroy();
+    afx_msg void OnPause();
+    afx_msg void OnStopAfterCurrentFile();
+    afx_msg void OnStopImmediately();
+    afx_msg void OnHelpHelp();
+    afx_msg void OnHelpAbout();
+    afx_msg void OnHelpWebsiteMonkeysAudio();
+    afx_msg void OnHelpWebsiteJRiver();
+    afx_msg void OnHelpWebsiteWinamp();
+    afx_msg void OnHelpWebsiteEac();
+    afx_msg void OnHelpLicense();
+    afx_msg void OnToolsOptions();
+    afx_msg void OnInitMenu(CMenu * pMenu);
+    afx_msg void OnInitMenuPopup(CMenu * pPopupMenu, UINT nIndex, BOOL bSysMenu);
+    afx_msg void OnGetMinMaxInfo(MINMAXINFO FAR * lpMMI);
+    afx_msg BOOL OnQueryEndSession();
+    afx_msg void OnEndSession [[ noreturn ]] (BOOL bEnding);
+    afx_msg LRESULT OnDPIChanged(WPARAM wParam, LPARAM lParam);
+    afx_msg void OnListItemChanged(NMHDR * pNMHDR, LRESULT * pResult);
+    afx_msg void OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMeasureItemStruct);
+    afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct);
+    afx_msg void OnClose();
+    DECLARE_MESSAGE_MAP()
+
+    bool m_bInitialized;
+    APE::CSmartPtr<CMACProcessFiles> m_spProcessFiles;
+    MAC_FILE_ARRAY m_aryFiles;
+    HACCEL m_hAcceleratorTable;
+    CString m_strAddFilesBasePath;
+    CMenu m_menuMain;
+    HICON m_hIcon;
+    bool m_bLastLoadMenuAndToolbarProcessing;
+    CStringArrayEx * m_paryFiles;
+    UINT m_nMonitorDPI;
+    int m_nFontHeight;
+    CMenu * m_pTrackingMenu;
+    BOOL m_bMenuShortcutMode;
+    int m_nShowingMenu;
+    HHOOK m_hMouseHook;
+    int m_nTimerMenuShow;
+    CAPEDuration m_timerMenuHide;
+
+    void LayoutWindow();
+    void UpdateWindow();
+    bool AddToolbarButton(int nID, int nBitmap, const CString & strText = _T(""), int nStyle = TBSTYLE_BUTTON);
+    bool SetAPECompressionLevel(int nAPECompressionLevel);
+    bool LoadMenuAndToolbar(bool bProcessing, bool bForce = false);
+    void SetToolbarButtonBitmap(int nID, int nBitmap) const;
+    void PlayDefaultSound();
+    void LoadScale(bool bForce = false);
+    void UpdateEnabledStates();
+    void GetMenuInfo(UINT nID, MENUITEMINFO & mi, CString & strText);
+    void SetMenuShortcutMode(BOOL bMenuShortcutMode);
+    void ShowMenu(int nMenu, bool bCheckForRecentHide = false);
+    void CreateMenu();
+    void DestroyMenus();
+
+    friend class CMACListCtrl;
+};

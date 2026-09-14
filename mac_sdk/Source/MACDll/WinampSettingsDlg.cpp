@@ -1,0 +1,129 @@
+#include "stdafx.h"
+#include "WinampSettingsDlg.h"
+
+IMPLEMENT_DYNAMIC(CWinampSettingsDlg, CDialog)
+
+CWinampSettingsDlg::CWinampSettingsDlg(CWnd * pParent)
+    : CDialog(CWinampSettingsDlg::IDD, pParent)
+{
+    m_hwndParent = APE_NULL;
+
+    GetModuleFileName(APE_NULL, m_strSettingsFilename.GetBuffer(APE_MAX_PATH), APE_MAX_PATH);
+    m_strSettingsFilename.ReleaseBuffer();
+    m_strSettingsFilename = m_strSettingsFilename.Left(m_strSettingsFilename.GetLength() - 3) + _T("ini");
+
+    LoadSettings();
+}
+
+CWinampSettingsDlg::~CWinampSettingsDlg()
+{
+}
+
+void CWinampSettingsDlg::DoDataExchange(CDataExchange * pDX)
+{
+    CDialog::DoDataExchange(pDX);
+    DDX_Check(pDX, IGNORE_BITSTREAM_ERRORS_CHECK, m_bIgnoreBitstreamErrors);
+    DDX_Check(pDX, SUPPRESS_SILENCE_CHECK, m_bSuppressSilence);
+    DDX_Check(pDX, SCALE_OUTPUT_CHECK, m_bScaleOutput);
+    DDX_Text(pDX, FILE_DISPLAY_METHOD_EDIT, m_strFileDisplayMethod);
+    DDX_Control(pDX, THREAD_PRIORITY_SLIDER, m_ctrlThreadPrioritySlider);
+}
+
+BEGIN_MESSAGE_MAP(CWinampSettingsDlg, CDialog)
+END_MESSAGE_MAP()
+
+bool CWinampSettingsDlg::LoadSettings()
+{
+    const CString strAppName = _T("APE Plugin Settings");
+
+    GetPrivateProfileString(strAppName, _T("File Display Method"), _T("%1 - %2"), m_strFileDisplayMethod.GetBuffer(1024), 1023, m_strSettingsFilename);
+    m_strFileDisplayMethod.ReleaseBuffer();
+    m_nThreadPriority = GetPrivateProfileInt(strAppName, _T("Thread Priority)"), THREAD_PRIORITY_HIGHEST, m_strSettingsFilename);
+    m_bScaleOutput = GetPrivateProfileInt(strAppName, _T("Scale Output"), false, m_strSettingsFilename);
+    m_bIgnoreBitstreamErrors = GetPrivateProfileInt(strAppName, _T("Ignore Bitstream Errors"), false, m_strSettingsFilename);
+    m_bSuppressSilence = GetPrivateProfileInt(strAppName, _T("Suppress Silence"), false, m_strSettingsFilename);
+
+    return true;
+}
+
+bool CWinampSettingsDlg::SaveSettings()
+{
+    const CString strAppName = _T("APE Plugin Settings");
+    CString strTemp;
+
+    WritePrivateProfileString(strAppName, _T("File Display Method"), m_strFileDisplayMethod, m_strSettingsFilename);
+
+    strTemp.Format(_T("%d"), m_nThreadPriority);
+    WritePrivateProfileString(strAppName, _T("Thread Priority"), strTemp, m_strSettingsFilename);
+
+    strTemp.Format(_T("%d"), m_bScaleOutput);
+    WritePrivateProfileString(strAppName, _T("Scale Output"), strTemp, m_strSettingsFilename);
+
+    strTemp.Format(_T("%d"), m_bIgnoreBitstreamErrors);
+    WritePrivateProfileString(strAppName, _T("Ignore Bitstream Errors"), strTemp, m_strSettingsFilename);
+
+    strTemp.Format(_T("%d"), m_bSuppressSilence);
+    WritePrivateProfileString(strAppName, _T("Suppress Silence"), strTemp, m_strSettingsFilename);
+
+    return true;
+}
+
+bool CWinampSettingsDlg::Show(HWND hwndParent)
+{
+    m_hwndParent = hwndParent;
+    DoModal();
+    return true;
+}
+
+BOOL CWinampSettingsDlg::OnInitDialog()
+{
+    CDialog::OnInitDialog();
+
+    m_ctrlThreadPrioritySlider.SetRange(0, 4);
+    m_ctrlThreadPrioritySlider.SetPos(GetSliderFromThreadPriority());
+
+    return true;  // return TRUE unless you set the focus to a control
+    // EXCEPTION: OCX Property Pages should return FALSE
+}
+
+void CWinampSettingsDlg::OnOK()
+{
+    UpdateData(true);
+    m_nThreadPriority = GetThreadPriorityFromSlider();
+
+    SaveSettings();
+
+    CDialog::OnOK();
+}
+
+int CWinampSettingsDlg::GetSliderFromThreadPriority()
+{
+    int nSlider = 4;
+    if (m_nThreadPriority == THREAD_PRIORITY_LOWEST)
+        nSlider = 0;
+    else if (m_nThreadPriority == THREAD_PRIORITY_BELOW_NORMAL)
+        nSlider = 1;
+    else if (m_nThreadPriority == THREAD_PRIORITY_NORMAL)
+        nSlider = 2;
+    else if (m_nThreadPriority == THREAD_PRIORITY_ABOVE_NORMAL)
+        nSlider = 3;
+    else if (m_nThreadPriority == THREAD_PRIORITY_HIGHEST)
+        nSlider = 4;
+    return nSlider;
+}
+
+int CWinampSettingsDlg::GetThreadPriorityFromSlider()
+{
+    int nThreadPriority = THREAD_PRIORITY_HIGHEST;
+    if (m_ctrlThreadPrioritySlider.GetPos() == 0)
+        nThreadPriority = THREAD_PRIORITY_LOWEST;
+    else if (m_ctrlThreadPrioritySlider.GetPos() == 1)
+        nThreadPriority = THREAD_PRIORITY_BELOW_NORMAL;
+    else if (m_ctrlThreadPrioritySlider.GetPos() == 2)
+        nThreadPriority = THREAD_PRIORITY_NORMAL;
+    else if (m_ctrlThreadPrioritySlider.GetPos() == 3)
+        nThreadPriority = THREAD_PRIORITY_ABOVE_NORMAL;
+    else if (m_ctrlThreadPrioritySlider.GetPos() == 4)
+        nThreadPriority = THREAD_PRIORITY_HIGHEST;
+    return nThreadPriority;
+}

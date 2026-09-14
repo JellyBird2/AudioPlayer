@@ -1,0 +1,11 @@
+prefix=/root/ape_player/third_party/codecs/install
+exec_prefix=/root/ape_player/third_party/codecs/install
+libdir=/root/ape_player/third_party/codecs/install/lib
+includedir=/root/ape_player/third_party/codecs/install/include
+
+Name: FLAC++
+Description: Free Lossless Audio Codec Library (C++ API)
+Version: 1.4.3
+Requires: flac
+Libs: -L${libdir} -lFLAC++
+Cflags: -I${includedir}

@@ -1,0 +1,6 @@
+These are the base classes for DirectShow filters.
+
+They can be found here:
+https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/Win7Samples/multimedia/directshow/baseclasses
+
+Then the only changes are a type cast change to avoid warnings (use static_cast) and lots of warning suppressions in Warnings.h (new file) and then include that file in streams.h.

@@ -1,0 +1,14 @@
+# libvorbisenc pkg-config source file
+
+prefix=/root/ape_player/third_party/codecs/install
+exec_prefix=/root/ape_player/third_party/codecs/install/bin
+libdir=/root/ape_player/third_party/codecs/install/lib
+includedir=/root/ape_player/third_party/codecs/install/include
+
+Name: vorbisenc
+Description: vorbisenc is a library that provides a convenient API for setting up an encoding environment using libvorbis
+Version: 1.3.7
+Requires.private: vorbis
+Conflicts:
+Libs: -L${libdir} -lvorbisenc
+Cflags: -I${includedir}

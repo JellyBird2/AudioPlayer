@@ -1,0 +1,11 @@
+# build outputs (regenerated; see README)
+build/
+build-mac/
+build-native/
+# codec intermediate cmake trees (rebuilt by third_party/codecs/build-deps.sh)
+third_party/codecs/b-*/
+# upstream Monkey's Audio SDK bundle (mac_sdk/ holds the trimmed build subset)
+MAC_SDK.zip
+# local link artifacts
+*.exe
+*.dll
