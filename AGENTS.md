@@ -1,18 +1,23 @@
 # AGENTS.md — AudioPlayer (AudioPlayer)
 
-## Layout: source is NOT here
-- Real source lives in WSL: `Ubuntu-26.04:/root/AudioPlayer`
-  (`\\wsl$\Ubuntu-26.04\root\AudioPlayer`). This Windows dir holds only the
-  shipped `AudioPlayer.exe`, `AGENTS.md`, `Icon.ico`, and `Fantasy/`
-  (13 `.ape` files — the user's music, also handy as convert/`--info` inputs).
-- Git: public repo `JellyBird2/AudioPlayer`, branch `main`, identity
-  `JellyBird2` + noreply email. No CI, no test suite.
+## Locations: repo (WSL) vs deploy folder (Windows)
+- Repo and only build host: WSL `Ubuntu-26.04:/root/AudioPlayer`
+  (`\\wsl$\Ubuntu-26.04\root\AudioPlayer`). Public `JellyBird2/AudioPlayer`,
+  branch `main`, identity `JellyBird2` + noreply email (already configured).
+  No CI, no test suite.
+- Deploy folder `C:\Dev\Projects\AudioPlayer` (NOT a repo): shipped
+  `AudioPlayer.exe`, `Icon.ico`, `Fantasy/` (the user's `.ape` music — also
+  handy as convert/`--info` inputs). Only the deployed exe goes here, never
+  build outputs.
+- This file lives in both places — keep the copies identical.
 
 ## GitHub (pushes + releases need the PAT)
-- Token lives at `/root/.ghtoken` (chmod 600, kept on purpose). Never store
-  it in the repo, git config, or the remote URL — use one-shot
-  `git -c http.extraHeader="AUTHORIZATION: Basic $(...)"` or a
+- Token lives at `/root/.ghtoken` (chmod 600, kept on purpose) and nowhere
+  else: never store it in the repo, git config, or the remote URL — use
+  one-shot `git -c http.extraHeader="AUTHORIZATION: Basic $(...)"` or a
   `curl -H "Authorization: Bearer ..."` script, then delete helpers.
+  (`PersonalAcessToken.txt` in the deploy folder is outside this flow —
+  ignore it.)
 - Exes ship via **Releases, never the code tree** (gitignored): create the
   release (`POST /repos/JellyBird2/AudioPlayer/releases`), then upload the
   asset to `uploads.github.com/.../releases/<id>/assets?name=AudioPlayer.exe`
@@ -30,9 +35,10 @@
   `=` inside `wsl` args (cmake `-DFOO=bar` gets split — run complex commands
   via a script file instead), and multi-file `wsl grep` (silently returns
   nothing — one file per call; use the Grep tool on UNC paths instead).
-- Helper scripts: the Write tool may emit CRLF — always
-  `sed -i 's/\r$//'` + verify with `cat -A` before running. Prefer `/root/`
-  over `/tmp/` for helper files (UNC writes to `/tmp` have silently vanished).
+- Helper scripts: the Write tool may emit CRLF and has dropped characters
+  before — always `sed -i 's/\r$//'` + read back (`cat -A`, `sh -n`) before
+  running. Prefer `/root/` over `/tmp/` for helper files (UNC writes to
+  `/tmp` have silently vanished).
 
 ## Build (WSL only)
 - `wsl --cd /root/AudioPlayer ./build-win.sh imgui` — the only build mode
@@ -64,7 +70,7 @@
   outputs into `Fantasy/` (user's files) and never assume the exe isn't
   running.
 
-## Architecture (`src/`, ~8k lines)
+## Architecture (`src/`)
 - `encode.cpp` dispatcher → `encode_pcm.cpp` (`PcmSource`: everything
   decodes to 16-bit frames) → `encode_extra.cpp` (FLAC/Vorbis/Opus/MP3
   engines + hand-rolled Ogg-Opus demuxer `OpusPcmSource`) → `cli.cpp`
@@ -78,6 +84,18 @@
   (`%.2f` below 1000, `%.4g` above); CLI `,/.` nudges ±0.1x floored at 0.01.
 
 ## UI notes (win_imgui.cpp, hard-earned)
+- Background work must NOT live only in `DrawMainUI()`: the main loop's
+  occluded early-out (`Present(0, TEST) == OCCLUDED` → `Sleep(10); continue`)
+  skips rendering entirely while minimized — `PollPlayback()` runs before it
+  so the playlist advances in the background.
+- Media keys need explicit `WndProc` handling: the ImGui backend maps no
+  `VK_MEDIA_*` (all `ImGuiKey_None`) and no `WM_APPCOMMAND`. Handle all three
+  paths — `WM_APPCOMMAND`, `VK_MEDIA_*` key-downs (ignore bit-30 repeats),
+  `WM_HOTKEY` via `RegisterHotKey` (ids 101–104, failures tolerated,
+  unregister on exit) for minimized/background.
+- `MenuItem` shortcut strings are display-only — bind keys in the
+  global-shortcuts block (`io.KeyCtrl`/`KeyShift` + `IsKeyPressed(key, false)`,
+  same not-typing/no-modal guards as the rest).
 - The old bottom status bar is deleted. `g_statusState`/`SetState()` are
   still written everywhere but displayed nowhere — dead until reused.
 - Bottom rows are flush with the window edge: host `WindowPadding.y = 0`
