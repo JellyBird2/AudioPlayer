@@ -5,7 +5,21 @@
   (`\\wsl$\Ubuntu-26.04\root\AudioPlayer`). This Windows dir holds only the
   shipped `AudioPlayer.exe`, `AGENTS.md`, `Icon.ico`, and `Fantasy/`
   (13 `.ape` files — the user's music, also handy as convert/`--info` inputs).
-- No git repo, no README, no CI, no test suite. Do not assume version control.
+- Git: public repo `JellyBird2/AudioPlayer`, branch `main`, identity
+  `JellyBird2` + noreply email. No CI, no test suite.
+
+## GitHub (pushes + releases need the PAT)
+- Token lives at `/root/.ghtoken` (chmod 600, kept on purpose). Never store
+  it in the repo, git config, or the remote URL — use one-shot
+  `git -c http.extraHeader="AUTHORIZATION: Basic $(...)"` or a
+  `curl -H "Authorization: Bearer ..."` script, then delete helpers.
+- Exes ship via **Releases, never the code tree** (gitignored): create the
+  release (`POST /repos/JellyBird2/AudioPlayer/releases`), then upload the
+  asset to `uploads.github.com/.../releases/<id>/assets?name=AudioPlayer.exe`
+  with `Content-Type: application/octet-stream`. Release tags track the
+  version in `src/win_res.rc` (e.g. `v2.2.0`).
+- Pushes go to `main`. Working tree + remote must both be clean/verified
+  (`git status --short`, `git ls-remote origin`) before reporting done.
 
 ## Accessing WSL files
 - Read/edit/write tools accept UNC paths, e.g.
@@ -13,8 +27,12 @@
 - Shell is PowerShell; prefer `wsl --cd /root/AudioPlayer <cmd> <args>`.
   Avoid `wsl -e sh -c '...'` (PowerShell mangles quoting/pipes), pipes to
   Windows cmdlets after `wsl` (e.g. `| tail` runs in PowerShell, not WSL),
-  and multi-file `wsl grep` (silently returns nothing — one file per call;
-  use the Grep tool on UNC paths instead).
+  `=` inside `wsl` args (cmake `-DFOO=bar` gets split — run complex commands
+  via a script file instead), and multi-file `wsl grep` (silently returns
+  nothing — one file per call; use the Grep tool on UNC paths instead).
+- Helper scripts: the Write tool may emit CRLF — always
+  `sed -i 's/\r$//'` + verify with `cat -A` before running. Prefer `/root/`
+  over `/tmp/` for helper files (UNC writes to `/tmp` have silently vanished).
 
 ## Build (WSL only)
 - `wsl --cd /root/AudioPlayer ./build-win.sh imgui` — the only build mode
